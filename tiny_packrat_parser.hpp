@@ -44,16 +44,32 @@ namespace tpp {
 		args_type args_;
 	};
 	template<typename Tag, typename... Args>
-	auto make_expr(Args const&... args) -> decltype(auto) {
+	auto make_expr_impl(Args const&... args) -> decltype(auto) {
 		return tpp::expr<Tag, Args...>(args...);}
+
+	template<typename T> struct is_expr { static constexpr bool value = false; };
+	template<typename Tag, typename... Args> struct is_expr<tpp::expr<Tag, Args...>> {
+		static constexpr bool value = true; };
+	template<typename Arg>
+	auto make_terminal_or_pass_expr(Arg arg, 
+			std::enable_if_t<tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
+		return arg;
+	}
+	template<typename T>
+	auto make_terminal(T const& t) -> decltype(auto) {
+		return tpp::make_expr_impl<tpp::tag::terminal>(t);
+	}
+	template<typename Arg>
+	auto make_terminal_or_pass_expr(Arg arg, 
+			std::enable_if_t<!tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
+		return tpp::make_terminal(arg);
+	}
+	template<typename Tag, typename... Args>
+	auto make_expr(Args const&... args) -> decltype(auto) {
+		return tpp::make_expr_impl<Tag>(tpp::make_terminal_or_pass_expr(args)...);}
 
 	template<std::size_t I, typename Expr>
 	using expr_element_t = std::tuple_element_t<I, typename Expr::args_type>;
-
-	template<typename T>
-	auto make_terminal(T const& t) -> decltype(auto) {
-		return tpp::make_expr<tpp::tag::terminal>(t);
-	}
 
 	template<typename T>
 	auto make_kleene(T const& t) -> decltype(auto) {

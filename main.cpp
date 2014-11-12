@@ -19,7 +19,8 @@ int main() {
 
 	auto result = tpp::parse(
 		source.begin(), source.end(), 
-		*tpp::make_terminal(tpp::lit("he")[printer])
+		//*tpp::make_terminal(tpp::lit("he")[printer])
+		*tpp::lit("he")[printer]
 	);
 	std::cout << result << std::endl;
 	auto attribute = result.attribute();
