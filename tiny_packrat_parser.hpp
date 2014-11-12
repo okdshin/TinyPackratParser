@@ -21,7 +21,7 @@ namespace tpp {
 	template<typename Expr> using tag_t = typename tpp::tag_of<Expr>::type;
 	template<typename Expr, typename Tag>
 	struct is_tag_same {
-		static const bool value = std::is_same<tpp::tag_t<Expr>, Tag>::value;
+		static constexpr bool value = std::is_same<tpp::tag_t<Expr>, Tag>::value;
 	};
 	
 	//
@@ -50,17 +50,18 @@ namespace tpp {
 	template<typename T> struct is_expr { static constexpr bool value = false; };
 	template<typename Tag, typename... Args> struct is_expr<tpp::expr<Tag, Args...>> {
 		static constexpr bool value = true; };
-	template<typename Arg>
-	auto make_terminal_or_pass_expr(Arg arg, 
-			std::enable_if_t<tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
-		return arg;
-	}
+	
 	template<typename T>
 	auto make_terminal(T const& t) -> decltype(auto) {
 		return tpp::make_expr_impl<tpp::tag::terminal>(t);
 	}
 	template<typename Arg>
-	auto make_terminal_or_pass_expr(Arg arg, 
+	auto make_terminal_or_pass_expr(Arg const& arg, 
+			std::enable_if_t<tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
+		return arg;
+	}
+	template<typename Arg>
+	auto make_terminal_or_pass_expr(Arg const& arg, 
 			std::enable_if_t<!tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
 		return tpp::make_terminal(arg);
 	}
@@ -82,14 +83,14 @@ namespace tpp {
 	struct unused {};
 	template<typename T>
 	struct is_unused {
-		static const bool value = std::is_same<T, tpp::unused>::value;
+		static constexpr bool value = std::is_same<T, tpp::unused>::value;
 	};
 
 	template<typename Expr, typename Enable=void> struct attribute {};
 	template<typename Expr> using attribute_t = typename tpp::attribute<Expr>::type;
 	template<typename Expr>
 	struct is_attribute_unused {
-		static const bool value = tpp::is_unused<tpp::attribute_t<Expr>>::value;
+		static constexpr bool value = tpp::is_unused<tpp::attribute_t<Expr>>::value;
 	};
 
 	// terminal
