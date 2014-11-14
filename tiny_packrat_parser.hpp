@@ -13,7 +13,7 @@ namespace tpp {
 	namespace tag {
 		struct terminal {}; struct unary_plus {}; struct negate {};
 		struct dereference {}; struct address_of {}; struct logical_not {};
-		struct shift_left {}; struct modulus {}; struct minus {};
+		struct shift_right {}; struct modulus {}; struct minus {};
 		struct bitwise_or {}; struct mem_ptr {};
 	}// namespace tag
 
@@ -86,6 +86,11 @@ namespace tpp {
 		static constexpr bool value = std::is_same<T, tpp::unused>::value;
 	};
 
+	template<typename T>
+	struct is_vector { static constexpr bool value = false; };
+	template<typename T>
+	struct is_vector<std::vector<T>> { static constexpr bool value = true; };
+
 	template<typename Expr, typename Enable=void> struct attribute {};
 	template<typename Expr> using attribute_t = typename tpp::attribute<Expr>::type;
 	template<typename Expr>
@@ -104,6 +109,167 @@ namespace tpp {
 		using type = typename tpp::expr_element_t<0, Expr>::attribute_type;
 	};
 
+	/*
+	template<typename T, typename=void>
+	struct value_type {
+		using type = void;
+	};
+	template<typename T>
+	struct value_type<T, std::enable_if_t<tpp::is_vector<T>::value>>{
+		using type = typename T::value_type;
+	};
+	template<typename T>
+	using value_type_t = typename value_type<T>::type;
+	*/
+	// sequence
+	/*
+	a: A, b: B --> (a >> b): tuple<A, B>
+	a: A, b: Unused --> (a >> b): A
+	a: Unused, b: B --> (a >> b): B
+	a: Unused, b: Unused --> (a >> b): Unused
+
+	a: A, b: A --> (a >> b): vector<A>
+	a: vector<A>, b: A --> (a >> b): vector<A>
+	a: A, b: vector<A> --> (a >> b): vector<A>
+	a: vector<A>, b: vector<A> --> (a >> b): vector<A>
+	*/
+	template<typename A, typename B>
+	struct attribute_of_sequence { using type = std::tuple<A, B>; };
+	template<typename A>
+	struct attribute_of_sequence<A, tpp::unused> { using type = A; };
+	template<typename A>
+	struct attribute_of_sequence<tpp::unused, A> { using type = A; };
+	template<>
+	struct attribute_of_sequence<tpp::unused, tpp::unused> { using type = tpp::unused; };
+
+	template<typename A>
+	struct attribute_of_sequence<A, A> { using type = std::vector<A>; };
+	template<typename A>
+	struct attribute_of_sequence<std::vector<A>, A> { using type = std::vector<A>; };
+	template<typename A>
+	struct attribute_of_sequence<A, std::vector<A>> { using type = std::vector<A>; };
+	template<typename A>
+	struct attribute_of_sequence<std::vector<A>, std::vector<A>> {
+		using type = std::vector<A>; };
+
+	/*
+	template<typename A, typename B>
+	using attribute_of_sequence_t =
+		std::conditional_t<tpp::is_unused<A>::value,
+			std::conditional_t<tpp::is_unused<B>::value,
+				tpp::unused, // <- a:Unused >> b:Unused
+				B // <- a:Unused >> b:B
+			>,
+			std::conditional_t<tpp::is_unused<B>::value,
+				A, // <- a:A >> b:Unused
+				std::conditional_t<std::is_same<A, B>::value,
+					A, // <- a:A >> b:A
+					std::conditional_t<tpp::is_vector<attr0_type>::value,
+						std::conditional<std::is_same<tpp::value_type_t<A>, attr1_type>::value,
+							A, // <- a:vector<B> >> b:B
+							std::tuple<A, B> // <- a:A >> b:B
+						>,
+						std::conditional_t<tpp::is_vector<attr1_type>::value,
+							std::conditional<std::is_same<tpp::value_type_t<attr1_type>, attr0_type>::value,
+								B, // <- a:A >> b:vector<A>
+								std::tuple<A, B> // <- a:A >> b:B
+							>,
+							std::tuple<A, B> // <- a:A >> b:B
+						>
+					>
+				>
+			>
+		>;
+	*/
+	template<typename Expr>
+	struct attribute<
+		Expr,
+		std::enable_if_t<
+			tpp::is_tag_same<Expr, tpp::tag::shift_right>::value
+		>
+	> {
+	private:
+		using attr0_type = tpp::attribute_t<tpp::expr_element_t<0, Expr>>;
+		using attr1_type = tpp::attribute_t<tpp::expr_element_t<1, Expr>>;
+	public:
+		using type = typename tpp::attribute_of_sequence<attr0_type, attr1_type>::type;
+		/*
+		using type = 
+			std::conditional_t<tpp::is_unused<attr0_type>::value,
+				std::conditional_t<tpp::is_unused<attr1_type>::value,
+					tpp::unused, // unused >> unused
+					attr1_type // unused >> B
+				>,
+				std::conditional_t<tpp::is_unused<attr1_type>::value,
+					attr0_type, // A >> unused
+					std::conditional_t<std::is_same<attr0_type, attr1_type>::value,
+						attr0_type, // A >> A
+						std::conditional_t<tpp::is_vector<attr0_type>::value,
+							std::conditional<std::is_same<tpp::value_type_t<attr0_type>, attr1_type>::value,
+								attr0_type, // std::vector<A> >> A
+								std::tuple<attr0_type, attr1_type> // std::vector<A> >> B
+							>,
+							std::conditional_t<tpp::is_vector<attr1_type>::value,
+								std::conditional<std::is_same<tpp::value_type_t<attr1_type>, attr0_type>::value,
+									attr1_type, // A >> std::vector<A>
+									std::tuple<attr0_type, attr1_type> // A >> std::vector<B>
+								>,
+								std::tuple<attr0_type, attr1_type> // A >> B
+							>
+						>
+					>
+				>
+			>;
+		*/
+	};
+	template<typename Attribute>
+	struct dammy_attribute_parser { using attribute_type = Attribute; };
+	template<std::size_t I>
+	using dammy_attribute = tpp::expr<tpp::tag::terminal,
+			tpp::dammy_attribute_parser<
+				std::integral_constant<std::size_t, I>
+			>
+		>;
+	struct dammy_unused_attribute_parser { using attribute_type = tpp::unused; };
+	using dammy_unused_attribute = 
+		tpp::expr<tpp::tag::terminal, tpp::dammy_unused_attribute_parser>;
+
+	static_assert(
+		std::is_same<
+			tpp::attribute_t<
+				tpp::expr<tpp::tag::shift_right,
+					tpp::dammy_unused_attribute, tpp::dammy_unused_attribute
+				>
+			>,
+			tpp::unused
+		>::value,
+		"error"
+	);
+	static_assert(
+		std::is_same<
+			tpp::attribute_t<
+				tpp::expr<tpp::tag::shift_right,
+					tpp::dammy_attribute<0>, tpp::dammy_attribute<1>
+				>
+			>,
+			std::tuple<
+				std::integral_constant<std::size_t, 0>, 
+				std::integral_constant<std::size_t, 1>
+			>
+		>::value,
+		"error"
+	);
+	
+/*
+a: A, b: B --> (a >> b): tuple<A, B>
+a: A, b: Unused --> (a >> b): A
+a: Unused, b: B --> (a >> b): B
+a: Unused, b: Unused --> (a >> b): Unused
+a: A, b: A --> (a >> b): vector<A>
+a: vector<A>, b: A --> (a >> b): vector<A>
+a: A, b: vector<A> --> (a >> b): vector<A>
+a: vector<A>, b: vector<A> --> (a >> b): vector<A>
+*/
 	// dereference
 	// *unused -> unused
 	// *A -> std::vector<A>
