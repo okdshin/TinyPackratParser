@@ -5,6 +5,7 @@
 #include <type_traits>
 #include <vector>
 #include <functional>
+#include<experimental/optional>
 
 namespace tpp {
 	//
@@ -36,10 +37,7 @@ namespace tpp {
 
 		template<std::size_t I> auto get() const -> decltype(auto) {
 			return std::get<I>(args_); } 
-		/*
-		template<std::size_t I> auto get() -> decltype(auto) {
-			return std::get<I>(args_); } 
-		*/
+
 	private:
 		args_type args_;
 	};
@@ -55,49 +53,58 @@ namespace tpp {
 	auto make_terminal(T const& t) -> decltype(auto) {
 		return tpp::make_expr_impl<tpp::tag::terminal>(t);
 	}
+
+	template<typename TerminalSourceOrExpr, typename=void>
+	struct make_terminal_or_pass_expr;
+
 	template<typename Arg>
-	auto make_terminal_or_pass_expr(Arg const& arg, 
-			std::enable_if_t<tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
-		return arg;
-	}
+	struct make_terminal_or_pass_expr<
+		Arg, 
+		std::enable_if_t<tpp::is_expr<Arg>::value>
+	> {
+		static auto call(Arg const& arg) -> decltype(auto) { return arg; }
+	};
 	template<typename Arg>
-	auto make_terminal_or_pass_expr(Arg const& arg, 
-			std::enable_if_t<!tpp::is_expr<Arg>::value>* =nullptr) -> decltype(auto) {
-		return tpp::make_terminal(arg);
-	}
+	struct make_terminal_or_pass_expr<
+		Arg, 
+		std::enable_if_t<!tpp::is_expr<Arg>::value>
+	> {
+		static auto call(Arg const& arg) -> decltype(auto) {
+			return tpp::make_terminal(arg);
+		}
+	};
 	template<typename Tag, typename... Args>
 	auto make_expr(Args const&... args) -> decltype(auto) {
-		return tpp::make_expr_impl<Tag>(tpp::make_terminal_or_pass_expr(args)...);}
+		return tpp::make_expr_impl<Tag>(tpp::make_terminal_or_pass_expr<Args>::call(args)...);
+	}
 
 	template<std::size_t I, typename Expr>
 	using expr_element_t = std::tuple_element_t<I, typename Expr::args_type>;
-
-	template<typename T>
-	auto make_kleene(T const& t) -> decltype(auto) {
-		return tpp::make_expr<tpp::tag::dereference>(t);
-	}
 
 	//
 	// attribute
 	//
 	struct unused {};
+
 	template<typename T>
-	struct is_unused {
-		static constexpr bool value = std::is_same<T, tpp::unused>::value;
+	using optional = std::experimental::optional<T>;
+
+	template<typename A, typename B>
+	class variant {
+	public:
+		variant(A const& a) : a_(a), b_() {}
+		variant(B const& b) : a_(), b_(b) {}
+
+		operator A() const { return *a_; }
+		operator B() const { return *b_; }
+	private:	
+		tpp::optional<A> a_;
+		tpp::optional<B> b_;
 	};
-
-	template<typename T>
-	struct is_vector { static constexpr bool value = false; };
-	template<typename T>
-	struct is_vector<std::vector<T>> { static constexpr bool value = true; };
-
-	template<typename Expr, typename Enable=void> struct attribute {};
+	
+	template<typename Expr, typename Enable=void> struct attribute;
 	template<typename Expr> using attribute_t = typename tpp::attribute<Expr>::type;
-	template<typename Expr>
-	struct is_attribute_unused {
-		static constexpr bool value = tpp::is_unused<tpp::attribute_t<Expr>>::value;
-	};
-
+	
 	// terminal
 	template<typename Expr>
 	struct attribute<
@@ -108,19 +115,80 @@ namespace tpp {
 	> {
 		using type = typename tpp::expr_element_t<0, Expr>::attribute_type;
 	};
+	
+	template<typename Expr, template<typename> class AttributeOf>
+	using attribute_of_unary_expr_t =
+		typename AttributeOf<
+			tpp::attribute_t<tpp::expr_element_t<0, Expr>>
+		>::type;
+	template<typename Expr, template<typename, typename> class AttributeOf>
+	using attribute_of_binary_expr_t = 
+		typename AttributeOf<
+			tpp::attribute_t<tpp::expr_element_t<0, Expr>>,
+			tpp::attribute_t<tpp::expr_element_t<1, Expr>>
+		>::type;
+	template<typename Expr, template<typename, typename, typename> class AttributeOf>
+	using attribute_of_ternary_expr_t = 
+		typename AttributeOf<
+			tpp::attribute_t<tpp::expr_element_t<0, Expr>>,
+			tpp::attribute_t<tpp::expr_element_t<1, Expr>>,
+			tpp::attribute_t<tpp::expr_element_t<2, Expr>>
+		>::type;
 
+	// kleene
 	/*
-	template<typename T, typename=void>
-	struct value_type {
-		using type = void;
-	};
-	template<typename T>
-	struct value_type<T, std::enable_if_t<tpp::is_vector<T>::value>>{
-		using type = typename T::value_type;
-	};
-	template<typename T>
-	using value_type_t = typename value_type<T>::type;
+	a: A --> *a: vector<A>
+	a: Unused --> *a: Unused
 	*/
+	template<typename A>
+	struct attribute_of_kleene {
+		using type = std::vector<A>;
+	};
+	template<>
+	struct attribute_of_kleene<tpp::unused> {
+		using type = tpp::unused;
+	};
+
+	template<typename Expr>
+	struct attribute<
+		Expr,
+		std::enable_if_t<
+			tpp::is_tag_same<Expr, tpp::tag::dereference>::value
+		>
+	> {
+		using type = tpp::attribute_of_unary_expr_t<Expr, tpp::attribute_of_kleene>;
+	};
+
+	// alternative
+	/*
+	a: A, b: B --> (a | b): variant<A, B>
+	a: A, b: Unused --> (a | b): optional<A>
+	a: A, b: B, c: Unused --> (a | b | c): optional<variant<A, B> >
+	a: Unused, b: B --> (a | b): optional<B>
+	a: Unused, b: Unused --> (a | b): Unused
+	a: A, b: A --> (a | b): A
+	*/
+	template<typename A, typename B>
+	struct attribute_of_alternative { using type = tpp::variant<A, B>; };
+	template<typename A>
+	struct attribute_of_alternative<A, tpp::unused> { using type = tpp::optional<A>; };
+	template<typename A>
+	struct attribute_of_alternative<tpp::unused, A> { using type = tpp::optional<A>; };
+	template<>
+	struct attribute_of_alternative<tpp::unused, tpp::unused> { using type = tpp::unused; };
+	template<typename A>
+	struct attribute_of_alternative<A, A> { using type = A; };
+	
+	template<typename Expr>
+	struct attribute<
+		Expr,
+		std::enable_if_t<
+			tpp::is_tag_same<Expr, tpp::tag::bitwise_or>::value
+		>
+	> {
+		using type = tpp::attribute_of_binary_expr_t<Expr, tpp::attribute_of_alternative>;
+	};
+
 	// sequence
 	/*
 	a: A, b: B --> (a >> b): tuple<A, B>
@@ -134,53 +202,68 @@ namespace tpp {
 	a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 	*/
 	template<typename A, typename B>
-	struct attribute_of_sequence { using type = std::tuple<A, B>; };
+	struct attribute_of_sequence {
+		using type = std::tuple<A, B>;
+		static auto construct(A const& a, B const& b) -> type {
+			return std::make_tuple(a, b);
+		}
+	};
 	template<typename A>
-	struct attribute_of_sequence<A, tpp::unused> { using type = A; };
+	struct attribute_of_sequence<A, tpp::unused> {
+		using type = A;
+		static auto construct(A const& a, tpp::unused) -> type {
+			return a;
+		}
+	};
 	template<typename A>
-	struct attribute_of_sequence<tpp::unused, A> { using type = A; };
+	struct attribute_of_sequence<tpp::unused, A> {
+		using type = A;
+		static auto construct(tpp::unused, A const& b) -> type {
+			return b;
+		}
+	};
 	template<>
-	struct attribute_of_sequence<tpp::unused, tpp::unused> { using type = tpp::unused; };
+	struct attribute_of_sequence<tpp::unused, tpp::unused> {
+		using type = tpp::unused;
+		static auto construct(tpp::unused, tpp::unused) -> type {
+			return tpp::unused();
+		}
+	};
 
 	template<typename A>
-	struct attribute_of_sequence<A, A> { using type = std::vector<A>; };
+	struct attribute_of_sequence<A, A> {
+		using type = std::vector<A>;
+		static auto construct(A const& a, A const& b) -> type {
+			type attribute;
+			attribute.push_back(a); attribute.push_back(b);
+			return attribute;
+		}
+	};
 	template<typename A>
-	struct attribute_of_sequence<std::vector<A>, A> { using type = std::vector<A>; };
+	struct attribute_of_sequence<std::vector<A>, A> {
+		using type = std::vector<A>;
+		static auto construct(std::vector<A> a, A const& b) -> type {
+			a.push_back(b);
+			return a;
+		}
+	};
 	template<typename A>
-	struct attribute_of_sequence<A, std::vector<A>> { using type = std::vector<A>; };
+	struct attribute_of_sequence<A, std::vector<A>> {
+		using type = std::vector<A>;
+		static auto construct(A const& a, std::vector<A> b) -> type {
+			b.insert(b.begin(), a);
+			return b;
+		}
+	};
 	template<typename A>
 	struct attribute_of_sequence<std::vector<A>, std::vector<A>> {
-		using type = std::vector<A>; };
+		using type = std::vector<A>;
+		static auto construct(std::vector<A> a, std::vector<A> const& b) -> type {
+			std::copy(b.begin(), b.end(), std::back_inserter(a));
+			return a;
+		}
+	};
 
-	/*
-	template<typename A, typename B>
-	using attribute_of_sequence_t =
-		std::conditional_t<tpp::is_unused<A>::value,
-			std::conditional_t<tpp::is_unused<B>::value,
-				tpp::unused, // <- a:Unused >> b:Unused
-				B // <- a:Unused >> b:B
-			>,
-			std::conditional_t<tpp::is_unused<B>::value,
-				A, // <- a:A >> b:Unused
-				std::conditional_t<std::is_same<A, B>::value,
-					A, // <- a:A >> b:A
-					std::conditional_t<tpp::is_vector<attr0_type>::value,
-						std::conditional<std::is_same<tpp::value_type_t<A>, attr1_type>::value,
-							A, // <- a:vector<B> >> b:B
-							std::tuple<A, B> // <- a:A >> b:B
-						>,
-						std::conditional_t<tpp::is_vector<attr1_type>::value,
-							std::conditional<std::is_same<tpp::value_type_t<attr1_type>, attr0_type>::value,
-								B, // <- a:A >> b:vector<A>
-								std::tuple<A, B> // <- a:A >> b:B
-							>,
-							std::tuple<A, B> // <- a:A >> b:B
-						>
-					>
-				>
-			>
-		>;
-	*/
 	template<typename Expr>
 	struct attribute<
 		Expr,
@@ -188,107 +271,13 @@ namespace tpp {
 			tpp::is_tag_same<Expr, tpp::tag::shift_right>::value
 		>
 	> {
-	private:
-		using attr0_type = tpp::attribute_t<tpp::expr_element_t<0, Expr>>;
-		using attr1_type = tpp::attribute_t<tpp::expr_element_t<1, Expr>>;
-	public:
-		using type = typename tpp::attribute_of_sequence<attr0_type, attr1_type>::type;
-		/*
-		using type = 
-			std::conditional_t<tpp::is_unused<attr0_type>::value,
-				std::conditional_t<tpp::is_unused<attr1_type>::value,
-					tpp::unused, // unused >> unused
-					attr1_type // unused >> B
-				>,
-				std::conditional_t<tpp::is_unused<attr1_type>::value,
-					attr0_type, // A >> unused
-					std::conditional_t<std::is_same<attr0_type, attr1_type>::value,
-						attr0_type, // A >> A
-						std::conditional_t<tpp::is_vector<attr0_type>::value,
-							std::conditional<std::is_same<tpp::value_type_t<attr0_type>, attr1_type>::value,
-								attr0_type, // std::vector<A> >> A
-								std::tuple<attr0_type, attr1_type> // std::vector<A> >> B
-							>,
-							std::conditional_t<tpp::is_vector<attr1_type>::value,
-								std::conditional<std::is_same<tpp::value_type_t<attr1_type>, attr0_type>::value,
-									attr1_type, // A >> std::vector<A>
-									std::tuple<attr0_type, attr1_type> // A >> std::vector<B>
-								>,
-								std::tuple<attr0_type, attr1_type> // A >> B
-							>
-						>
-					>
-				>
-			>;
-		*/
+		using type = tpp::attribute_of_binary_expr_t<Expr, tpp::attribute_of_sequence>;
+		template<typename A, typename B>
+		static auto construct(A const& a, B const& b) -> type {
+			return tpp::attribute_of_sequence<A, B>::construct(a, b);
+		}
 	};
-	template<typename Attribute>
-	struct dammy_attribute_parser { using attribute_type = Attribute; };
-	template<std::size_t I>
-	using dammy_attribute = tpp::expr<tpp::tag::terminal,
-			tpp::dammy_attribute_parser<
-				std::integral_constant<std::size_t, I>
-			>
-		>;
-	struct dammy_unused_attribute_parser { using attribute_type = tpp::unused; };
-	using dammy_unused_attribute = 
-		tpp::expr<tpp::tag::terminal, tpp::dammy_unused_attribute_parser>;
-
-	static_assert(
-		std::is_same<
-			tpp::attribute_t<
-				tpp::expr<tpp::tag::shift_right,
-					tpp::dammy_unused_attribute, tpp::dammy_unused_attribute
-				>
-			>,
-			tpp::unused
-		>::value,
-		"error"
-	);
-	static_assert(
-		std::is_same<
-			tpp::attribute_t<
-				tpp::expr<tpp::tag::shift_right,
-					tpp::dammy_attribute<0>, tpp::dammy_attribute<1>
-				>
-			>,
-			std::tuple<
-				std::integral_constant<std::size_t, 0>, 
-				std::integral_constant<std::size_t, 1>
-			>
-		>::value,
-		"error"
-	);
 	
-/*
-a: A, b: B --> (a >> b): tuple<A, B>
-a: A, b: Unused --> (a >> b): A
-a: Unused, b: B --> (a >> b): B
-a: Unused, b: Unused --> (a >> b): Unused
-a: A, b: A --> (a >> b): vector<A>
-a: vector<A>, b: A --> (a >> b): vector<A>
-a: A, b: vector<A> --> (a >> b): vector<A>
-a: vector<A>, b: vector<A> --> (a >> b): vector<A>
-*/
-	// dereference
-	// *unused -> unused
-	// *A -> std::vector<A>
-	template<typename Expr>
-	struct attribute<
-		Expr,
-		std::enable_if_t<
-			tpp::is_tag_same<Expr, tpp::tag::dereference>::value
-		>
-	> {
-	private:
-		using element0_attribute_type = tpp::attribute_t<tpp::expr_element_t<0, Expr>>;
-	public:
-		using type = std::conditional_t<tpp::is_unused<element0_attribute_type>::value,
-			tpp::unused,
-			std::vector<element0_attribute_type>
-		>;
-	};
-
 	//
 	// context
 	//
@@ -337,24 +326,29 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 	public:
 		using attribute_type = Attribute;
 		eval_result(
-			bool is_success, 
-			attribute_type const& attribute, 
-			tpp::context<Iter> const& context
-		) : is_success_(is_success), attribute_(attribute), context_(context) {}
-		bool is_success() const { return is_success_; }
-		attribute_type attribute() const { return attribute_; }
+			tpp::context<Iter>& context,
+			attribute_type const& attribute
+		) : context_(context), attribute_opt_(attribute) {}
+		eval_result(tpp::context<Iter>& context) : 
+			context_(context), attribute_opt_() {}
+		bool is_success() const { return static_cast<bool>(attribute_opt_); }
+		attribute_type attribute() const { return *attribute_opt_; }
 	private:
-		bool is_success_;
-		attribute_type attribute_;
-		tpp::context<Iter> context_;
+		tpp::context<Iter>& context_;
+		tpp::optional<attribute_type> attribute_opt_;
 	};
 	template<typename Attribute, typename Iter>
 	auto make_eval_result(
-		bool is_success, 
-		Attribute attribute, 
-		tpp::context<Iter> const& context
+		tpp::context<Iter>& context,
+		Attribute const& attribute
 	) -> decltype(auto) {
-		return tpp::eval_result<Attribute, Iter>(is_success, attribute, context);
+		return tpp::eval_result<Attribute, Iter>(context, attribute);
+	}
+	template<typename Attribute, typename Iter>
+	auto make_false_eval_result(
+		tpp::context<Iter>& context
+	) -> decltype(auto) {
+		return tpp::eval_result<Attribute, Iter>(context);
 	}
 	template<typename Attribute, typename Iter>
 	auto operator<<(std::ostream& os, 
@@ -369,10 +363,20 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 	template<typename Expr, typename=void>
 	struct eval_impl;
 
-	template<typename Expr, typename Iter>
-	auto eval(Expr const& expr, tpp::context<Iter>& context) -> decltype(auto)  {
-		return tpp::eval_impl<Expr>::call(expr, context);
+	template<typename Arg, typename Iter>
+	auto eval(
+		Arg const& arg,
+		tpp::context<Iter>& context
+	) -> decltype(auto)  {
+		auto expr = tpp::make_terminal_or_pass_expr<Arg>::call(arg);
+		return tpp::eval_impl<decltype(expr)>::call(expr, context);
 	}
+
+	template<typename Expr>
+	struct is_attribute_unused {
+		static constexpr bool value =
+			std::is_same<tpp::attribute_t<Expr>, tpp::unused>::value;
+	};
 
 	// terminal
 	template<typename Expr>
@@ -405,9 +409,11 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 					break;
 				}
 			}
-			return tpp::make_eval_result(true, tpp::unused(), context);
+			return tpp::make_eval_result(context, tpp::unused());
 		}
 	};
+
+	// dereference
 	template<typename Expr>
 	struct eval_impl<
 		Expr,
@@ -426,10 +432,61 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 				}
 				attribute.push_back(eval_result.attribute());
 			}
-			return tpp::make_eval_result(true, attribute, context);
+			return tpp::make_eval_result(context, attribute);
+		}
+	};
+
+	// bitwise_or
+	template<typename Expr>
+	struct eval_impl<
+		Expr,
+		std::enable_if_t<
+			std::is_same<tpp::tag_t<Expr>, tpp::tag::bitwise_or>::value
+		>
+	> {
+		template<typename Iter>
+		static auto call(Expr const& expr, tpp::context<Iter>& context) -> decltype(auto) {
+			auto result0 = tpp::eval(expr.template get<0>(), context);
+			if(result0.is_success()) {
+				return tpp::make_eval_result(context,
+					tpp::attribute_t<Expr>(result0.attribute()));
+			}
+			else {
+				auto result1 = tpp::eval(expr.template get<1>(), context);
+				if(result1.is_success()) {
+					return tpp::make_eval_result(context,
+						tpp::attribute_t<Expr>(result1.attribute()));
+				}
+			}
+			return tpp::make_false_eval_result<tpp::attribute_t<Expr>>(context);
 		}
 	};
 	
+	// shift_right
+	template<typename Expr>
+	struct eval_impl<
+		Expr,
+		std::enable_if_t<
+			std::is_same<tpp::tag_t<Expr>, tpp::tag::shift_right>::value
+		>
+	> {
+		template<typename Iter>
+		static auto call(Expr const& expr, tpp::context<Iter>& context) -> decltype(auto) {
+			auto result0 = tpp::eval(expr.template get<0>(), context);
+			if(result0.is_success()) {
+				auto result1 = tpp::eval(expr.template get<1>(), context);
+				if(result1.is_success()) {
+					return tpp::make_eval_result(
+						context,
+						tpp::attribute<Expr>::construct(
+							result0.attribute(), result1.attribute())
+					);
+				}
+			}
+			return tpp::make_false_eval_result<tpp::attribute_t<Expr>>(context);
+		}
+	};
+
 	template<typename Iter, typename Expr>
 	auto parse(Iter first, Iter last, Expr const& expr) -> decltype(auto) {
 		auto context = tpp::make_context(first, last);
@@ -472,15 +529,15 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 			auto parse_result = internal_parser_.parse(context);
 			if(!parse_result.is_success()) {
 				context.return_to_last_checkpoint();
+				return tpp::make_false_eval_result<attribute_type>(context);
 			}
 			else {
 				context.remove_last_checkpoint();
 				if(action_) {
 					action_(parse_result.attribute());
 				}
+				return tpp::make_eval_result(context, parse_result.attribute());
 			}
-			return tpp::make_eval_result(
-				parse_result.is_success(), parse_result.attribute(), context);
 		}
 		base_parser& operator[](action_type action) {
 			action_ = action;
@@ -491,10 +548,10 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 		internal_parser_type internal_parser_;
 		action_type action_;
 	};
-	class literal {
+	class literal_parser {
 	public:
 		using attribute_type = std::string;
-		literal(std::string const& word) : word_(word) {}
+		literal_parser(std::string const& word) : word_(word) {}
 		template<typename Iter>
 		auto parse(tpp::context<Iter>& context) const {
 			for(auto c : word_) {
@@ -508,11 +565,19 @@ a: vector<A>, b: vector<A> --> (a >> b): vector<A>
 	private:
 		std::string word_;
 	};
-	using lit = tpp::base_parser<tpp::literal>;
+	using lit = tpp::base_parser<tpp::literal_parser>;
 
 	template<typename Expr>
 	auto operator*(Expr const& expr) -> decltype(auto) {
-		return tpp::make_kleene(expr);
+		return tpp::make_expr_impl<tpp::tag::dereference>(expr);
+	}
+	template<typename Expr0, typename Expr1>
+	auto operator|(Expr0 const& expr0, Expr1 const& expr1) -> decltype(auto) {
+		return tpp::make_expr_impl<tpp::tag::bitwise_or>(expr0, expr1);
+	}
+	template<typename Expr0, typename Expr1>
+	auto operator>>(Expr0 const& expr0, Expr1 const& expr1) -> decltype(auto) {
+		return tpp::make_expr_impl<tpp::tag::shift_right>(expr0, expr1);
 	}
 }// namespace tpp
 

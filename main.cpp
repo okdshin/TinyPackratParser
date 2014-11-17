@@ -2,53 +2,44 @@
 #include "tiny_packrat_parser.hpp"
 #include <cxxabi.h>
 
-class print_parser {
+class printer {
 public:
 	using attribute_type = tpp::unused;
-
-	template<typename Iter>
-	bool operator()(tpp::context<Iter>& context) const {
-		std::cout << std::string(context.first(), context.last()) << std::endl;
-		return false;
+	explicit printer(std::size_t id) : id_(id) {}
+	template<typename Attribute>
+	void operator()(Attribute const& attribute) const {
+		std::cout << id_ << ":" << attribute << std::endl;
 	}
+
+private:
+	std::size_t id_;
 };
 
-template<typename T> void print_type(std::string const& message) {
-	int status;
-	std::cout << message << "\t\t" << 
-		abi::__cxa_demangle(typeid(T).name(), 0, 0, &status) << std::endl;
-}
 int main() {
-	print_type<
-		tpp::expr<tpp::tag::dereference,
-			tpp::dammy_unused_attribute
-		>
-	>("kleene");
-	print_type<
-		tpp::attribute_t<
-			tpp::expr<tpp::tag::shift_right,
-				tpp::dammy_attribute<0>, tpp::dammy_attribute<1>
-			>
-		>
-	>("sequence");
-	print_type<std::tuple<tpp::dammy_attribute<0>, tpp::dammy_attribute<1>>>("tuple");
-	
 	std::cout << "hello world" << std::endl;
 
 	std::string source = "hehehehello";
+	std::string source2 = "morning";
 	std::cout << "source: " << source << std::endl;
-	auto printer = [](std::string const& word) { std::cout << ":" << word << std::endl; };
 
+	auto expr = 
+		*tpp::make_terminal(tpp::lit("he")[printer(0)]) 
+			>> tpp::make_terminal(tpp::lit("llo")[printer(1)]) 
+		| tpp::make_terminal(tpp::lit("morning")[printer(2)])
+		| tpp::make_terminal(tpp::lit("afternoon")[printer(2)]);
 	auto result = tpp::parse(
-		source.begin(), source.end(), 
-		//*tpp::make_terminal(tpp::lit("he")[printer])
-		*tpp::lit("he")[printer]
+		source.begin(), source.end(), expr
+	);
+	auto result2 = tpp::parse(
+		source2.begin(), source2.end(), expr
 	);
 	std::cout << result << std::endl;
-	auto attribute = result.attribute();
+	//auto attribute = result.attribute();
+	/*
 	for(auto e : attribute) {
 		std::cout << e << " " << std::flush;
 	}
-	std::cout << std::endl;
+	*/
+	//std::cout << std::endl;
 
 }
