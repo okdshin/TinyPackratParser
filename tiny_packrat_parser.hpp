@@ -2,8 +2,10 @@
 #define TPP_TINY_PACKRAT_PARSER_HPP
 //20141112
 #include <cassert>
-#include <tuple>
+#include <utility>
 #include <type_traits>
+#include <tuple>
+#include <map>
 #include <vector>
 #include <functional>
 #include<experimental/optional>
@@ -19,7 +21,7 @@ namespace tpp {
 		struct bitwise_or {}; struct mem_ptr {};
 	}// namespace tag
 
-	template<typename Expr> struct tag_of { using type = typename Expr::tag_type; };
+	template<typename Expr> struct tag_of { using type = typename std::remove_reference_t<Expr>::tag_type; };
 	template<typename Expr> using tag_t = typename tpp::tag_of<Expr>::type;
 	template<typename Expr, typename Tag>
 	struct is_tag_same {
@@ -35,9 +37,12 @@ namespace tpp {
 		using args_type = std::tuple<Args...>;
 
 		explicit expr(Args const&... args) : args_(args...) {}
+		//explicit expr(Args&&... args) : args_(std::forward<Args>(args)...) {}
+		//explicit expr(Args&&... args) : args_(std::move(args)...) {}
 
 		template<std::size_t I> auto get() const -> decltype(auto) {
-			return std::get<I>(args_); } 
+			return std::get<I>(args_);
+		} 
 
 	private:
 		args_type args_;
@@ -47,6 +52,12 @@ namespace tpp {
 	auto make_expr_impl(Args const&... args) -> decltype(auto) {
 		return tpp::expr<Tag, Args...>(args...);
 	}
+	/*
+	template<typename Tag, typename... Args>
+	auto make_expr_impl(Args&&... args) -> decltype(auto) {
+		return tpp::expr<Tag, Args...>(std::forward<Args>(args)...);
+	}
+	*/
 
 	template<typename T> struct is_expr { static constexpr bool value = false; };
 	template<typename Tag, typename... Args> struct is_expr<tpp::expr<Tag, Args...>> {
@@ -83,7 +94,8 @@ namespace tpp {
 	}
 
 	template<std::size_t I, typename Expr>
-	using expr_element_t = std::tuple_element_t<I, typename Expr::args_type>;
+	using expr_element_t =
+		std::tuple_element_t<I, typename std::remove_reference_t<Expr>::args_type>;
 
 	//
 	// attribute
@@ -113,7 +125,7 @@ namespace tpp {
 		// default implementation
 		template<typename Arg0>
 		struct terminal_attribute {
-			using type = typename Arg0::attribute_type;
+			using type = typename std::remove_reference_t<Arg0>::attribute_type;
 		};
 	}// namespace traits
 	template<typename Arg0>
@@ -345,6 +357,9 @@ namespace tpp {
 		}
 	};
 	
+	template<typename Attribute, typename Iter>
+	class eval_result;
+
 	//
 	// context
 	//
@@ -370,14 +385,16 @@ namespace tpp {
 		void remove_last_checkpoint() {
 			checkpoint_stack_.pop_back();
 		}
-		bool match(typename std::iterator_traits<Iter>::value_type value) {
+		bool match(typename std::iterator_traits<Iter>::value_type const& value) {
 			bool is_success = !is_empty(*this) && *current_ == value;
 			if(is_success) { ++current_; }
 			return is_success;
 		}
+
 	private:
 		Iter first_, last_;
 		Iter current_;
+		std::size_t distance_;
 		std::vector<Iter> checkpoint_stack_;
 	};
 
@@ -441,13 +458,8 @@ namespace tpp {
 	) -> decltype(auto)  {
 		auto expr = tpp::make_terminal_or_pass_expr<Arg>::call(arg);
 		return tpp::eval_impl<decltype(expr)>::call(expr, context);
-	}
 
-	template<typename Expr>
-	struct is_attribute_unused {
-		static constexpr bool value =
-			std::is_same<tpp::attribute_t<Expr>, tpp::unused>::value;
-	};
+	}
 
 	// terminal
 	template<typename Expr>
