@@ -22,18 +22,30 @@ int main() {
 	std::string source2 = "morning";
 	std::cout << "source: " << source << std::endl;
 
+	/*
+	auto printer0 = printer(0);
 	auto expr = 
-		*tpp::make_terminal(tpp::lit("he")[printer(0)]) 
+		*tpp::make_terminal(tpp::lit("he")[printer0]) 
 			>> tpp::make_terminal(tpp::lit("llo")[printer(1)]) 
 		| tpp::make_terminal(tpp::lit("morning")[printer(2)])
 		| tpp::make_terminal(tpp::lit("afternoon")[printer(2)]);
+	*/
+	auto printer0 = printer(0);
+	printer0("aaaa");
+
+	auto l = tpp::lit("he")[printer0];
+	auto l2 = tpp::lit("llo")[printer0];
+	auto expr = *(tpp::make_terminal(l) | tpp::make_terminal(l2));
 	auto result = tpp::parse(
 		source.begin(), source.end(), expr
 	);
+	std::cout << result << std::endl;
+	/*
 	auto result2 = tpp::parse(
 		source2.begin(), source2.end(), expr
 	);
-	std::cout << result << std::endl;
+	std::cout << result2 << std::endl;
+	*/
 	//auto attribute = result.attribute();
 	/*
 	for(auto e : attribute) {
