@@ -36,8 +36,11 @@ namespace tpp {
 		using tag_type = Tag;
 		using args_type = std::tuple<Args...>;
 
+		/*
 		template<typename... As>
 		explicit expr(As&&... as) : args_(std::forward<As>(as)...) {}
+		*/
+		explicit expr(Args const&... args) : args_(args...) {}
 
 		template<std::size_t I> auto get() const -> decltype(auto) {
 			return std::get<I>(args_);
@@ -49,7 +52,7 @@ namespace tpp {
 
 	template<typename Tag, typename... Args>
 	auto make_expr_impl(Args&&... args) -> decltype(auto) {
-		return tpp::expr<Tag, Args...>(std::forward<Args>(args)...);
+		return tpp::expr<Tag, std::decay_t<Args>...>(std::forward<Args>(args)...);
 	}
 
 	template<typename T> struct is_expr { static constexpr bool value = false; };
@@ -99,12 +102,13 @@ namespace tpp {
 
 	template<typename T>
 	using optional = std::experimental::optional<T>;
+	using std::experimental::nullopt;
 
 	template<typename A, typename B>
 	class variant {
 	public:
-		variant(A const& a) : a_(a), b_() {}
-		variant(B const& b) : a_(), b_(b) {}
+		explicit variant(A const& a) : a_(a), b_() {}
+		explicit variant(B const& b) : a_(), b_(b) {}
 
 		operator A() const { return *a_; }
 		operator B() const { return *b_; }
@@ -411,14 +415,11 @@ namespace tpp {
 		using attribute_type = std::remove_reference_t<Attribute>;
 
 		template<typename Attr>
-		eval_result(
-			tpp::context<Iter>& context,
-			Attr const& attr
-		) : context_(context), 
-		attribute_opt_(attr) {} //TODO
+		eval_result(tpp::context<Iter>& context, Attr&& attr) : 
+			context_(context), attribute_opt_(std::forward<Attr>(attr)) {}
 
 		explicit eval_result(tpp::context<Iter>& context) : 
-			context_(context), attribute_opt_() {}
+			eval_result(context, tpp::nullopt) {}
 
 		bool is_success() const { return static_cast<bool>(attribute_opt_); }
 		attribute_type attribute() const { assert(is_success()); return *attribute_opt_; }
@@ -462,7 +463,6 @@ namespace tpp {
 	) -> decltype(auto)  {
 		auto expr = tpp::make_terminal_or_pass_expr<Arg>::call(arg);
 		return tpp::eval_impl<std::remove_cv_t<decltype(expr)>>::call(expr, context);
-
 	}
 
 	// terminal
@@ -585,9 +585,14 @@ namespace tpp {
 		using attribute_type = typename InternalParser::attribute_type;
 		using action_type = std::function<void (attribute_type)>;
 
+		/*
 		template<typename... Args>
 		explicit base_parser(Args&&... args) :
 			internal_parser_(std::forward<Args>(args)...), action_() {}
+		*/
+		template<typename... Args>
+		explicit base_parser(Args const&... args) :
+			internal_parser_(args...), action_() {}
 
 		template<typename Iter>
 		auto operator()(tpp::context<Iter>& context) const {
@@ -618,7 +623,7 @@ namespace tpp {
 	public:
 		using attribute_type = std::string;
 
-		literal_parser(std::string const& word) : word_(word) {}
+		explicit literal_parser(std::string word) : word_(std::move(word)) {}
 
 		template<typename Iter>
 		auto parse(tpp::context<Iter>& context) const -> decltype(auto) {
@@ -636,8 +641,8 @@ namespace tpp {
 	using lit = tpp::base_parser<tpp::literal_parser>;
 
 	template<typename Expr>
-	auto operator*(Expr const& expr) -> decltype(auto) {
-		return tpp::make_expr_impl<tpp::tag::dereference>(expr);
+	auto operator*(Expr expr) -> decltype(auto) {
+		return tpp::make_expr_impl<tpp::tag::dereference>(std::move(expr));
 	}
 	template<typename Expr0, typename Expr1>
 	auto operator|(Expr0 const& expr0, Expr1 const& expr1) -> decltype(auto) {
