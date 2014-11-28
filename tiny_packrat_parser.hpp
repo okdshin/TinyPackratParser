@@ -36,16 +36,37 @@ namespace tpp {
 		using tag_type = Tag;
 		using args_type = std::tuple<Args...>;
 
-		/*
-		template<typename... As>
-		explicit expr(As&&... as) : args_(std::forward<As>(as)...) {}
-		*/
+		// using const& but not && to avoid perfect forwarding copy constructor of death
 		explicit expr(Args const&... args) : args_(args...) {}
 
 		template<std::size_t I> auto get() const -> decltype(auto) {
 			return std::get<I>(args_);
 		} 
 
+		/*
+		template<typename Iter>
+		auto eval(tpp::context<Iter>& context) const {
+			context.make_checkpoint();
+			auto eval_result =
+				tpp::eval_impl<std::remove_cv_t<expr>::call(*this, context);
+			if(!eval_result.is_success()) {
+				context.return_to_last_checkpoint();
+				return tpp::make_false_eval_result<attribute_type>(context);
+			}
+			else {
+				context.remove_last_checkpoint();
+				if(action_) {
+					action_(parse_result.attribute());
+				}
+				return tpp::make_eval_result(context, parse_result.attribute());
+			}
+		}
+
+		base_parser& operator[](action_type action) {
+			action_ = action;
+			return *this;
+		}
+		*/
 	private:
 		args_type args_;
 	};
@@ -389,6 +410,7 @@ namespace tpp {
 			checkpoint_stack_.pop_back();
 		}
 		bool match(typename std::iterator_traits<Iter>::value_type const& value) {
+			std::cout << std::string(first_, current_) << "@" << std::string(current_, last_)  << std::endl;
 			bool is_success = !is_empty(*this) && *current_ == value;
 			if(is_success) { ++current_; }
 			return is_success;
@@ -585,11 +607,7 @@ namespace tpp {
 		using attribute_type = typename InternalParser::attribute_type;
 		using action_type = std::function<void (attribute_type)>;
 
-		/*
-		template<typename... Args>
-		explicit base_parser(Args&&... args) :
-			internal_parser_(std::forward<Args>(args)...), action_() {}
-		*/
+		// avoid perfect forwarding copy constructor of death
 		template<typename... Args>
 		explicit base_parser(Args const&... args) :
 			internal_parser_(args...), action_() {}

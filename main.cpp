@@ -25,8 +25,10 @@ int main() {
 	auto printer0 = printer(0);
 	auto he = tpp::lit("he")[printer0];
 	auto expr = 
-		*tpp::make_terminal(he) 
-			>> tpp::make_terminal(tpp::lit("llo")[printer(1)]) 
+		*tpp::make_terminal(tpp::lit("he")[printer(1)]) 
+			>> tpp::make_terminal(tpp::lit("lo")[printer(2)]) 
+		| *tpp::make_terminal(tpp::lit("he")[printer(11)])
+			>> tpp::make_terminal(tpp::lit("llo")[printer(12)]) 
 		| tpp::make_terminal(tpp::lit("morning")[printer(2)])
 		| tpp::make_terminal(tpp::lit("afternoon")[printer(2)]);
 	//auto printer0 = printer(0);
@@ -41,12 +43,10 @@ int main() {
 		source.begin(), source.end(), expr
 	);
 	std::cout << result << std::endl;
-	/*
 	auto result2 = tpp::parse(
 		source2.begin(), source2.end(), expr
 	);
 	std::cout << result2 << std::endl;
-	*/
 	//auto attribute = result.attribute();
 	/*
 	for(auto e : attribute) {
