@@ -15,4 +15,4 @@ def build(bld):
         source = "main.cpp",
         cxxflags = ["-std=c++14", "-g", "-Wall"],
         target = "a.out",
-        includes = "")
+        includes = "/home/okada/TinyPackratParser/")
